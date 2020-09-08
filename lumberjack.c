@@ -39,6 +39,7 @@ void print_usage(const char* name) {
   fprintf(stderr, "Usage: <some_binary> 2>&1 | %s [OPTION]...\n", name);
   fprintf(stderr, "       %s [OPTION]...\n", name);
   fprintf(stderr, "Chop log into smaller logs.\n\n");
+  fprintf(stderr, "  -a          append existing log output\n");
   fprintf(stderr, "  -d          add local datetime stamp at the start of each line\n");
   fprintf(stderr, "  -f FILENAME filename to use (default is %s)\n", DEFAULT_OUTPUT_LOG_FILENAME);
   fprintf(stderr, "  -h          print this usage and exit\n");
@@ -80,7 +81,7 @@ int rotate_log(FILE** file, const char* filename, int max_files) {
   }
 
   /* Open new log file */
-  *file = fopen(filename, "w");
+  *file = fopen(filename, "a");
   if (!*file) {
       fprintf(stderr, "Error: Failed to open new log for writing\n");
       return 1;
@@ -93,6 +94,7 @@ int main(int argc, char** argv) {
   const char* filename = DEFAULT_OUTPUT_LOG_FILENAME;
   int max_lines = DEFAULT_MAX_LINES;
   int max_files = DEFAULT_MAX_FILES;
+  int do_append = 0;
   int do_timestamp = 0;
   int do_epochstamp = 0;
 
@@ -105,9 +107,13 @@ int main(int argc, char** argv) {
   int line_count = 0;
 
   while(c != -1) {
-    c = getopt(argc, argv, "df:hl:n:t");
+    c = getopt(argc, argv, "adf:hl:n:t");
     switch (c) {
       case -1:
+        break;
+
+      case 'a':
+        do_append = 1;
         break;
 
       case 'd':
@@ -177,11 +183,35 @@ int main(int argc, char** argv) {
       goto exit;
     }
 
-  /* Initially rotate log to open log file and ensure log is new */
-  if(rotate_log(&file_out, filename, max_files) != 0) {
-    fprintf(stderr, "Error: Failed to initially rotate log\n");
-    ret = 1;
-    goto exit;
+    /* Read to end counting lines */
+    while (1) {
+      c = fgetc(file_out);
+      if (c == EOF) {
+        if (!is_newline) {
+          if(fputc('\n', file_out) == EOF) {
+            fprintf(stderr, "Error: Failed to write newline character\n");
+            ret = 1;
+            goto exit;
+          }
+          line_count++;
+          is_newline = 1;
+          fflush(file_out);
+        }
+        break;
+      }
+
+      is_newline = (c == '\n');
+      if (is_newline) {
+        line_count++;
+      }
+    }
+  } else {
+    /* Initially rotate log to open log file and ensure log is new */
+    if(rotate_log(&file_out, filename, max_files) != 0) {
+      fprintf(stderr, "Error: Failed to initially rotate log\n");
+      ret = 1;
+      goto exit;
+    }
   }
 
   /* Read and output to log, rotating log files as necessary */

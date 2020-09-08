@@ -12,6 +12,7 @@ Usage: <some_binary> 2>&1 | ./lumberjack [OPTION]...
        ./lumberjack [OPTION]...
 Chop log into smaller logs.
 
+  -a          append existing log output
   -d          add local datetime stamp at the start of each line
   -f FILENAME filename to use (default is log.log)
   -h          print this usage and exit
