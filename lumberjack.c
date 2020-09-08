@@ -43,6 +43,7 @@ void print_usage(const char* name) {
   fprintf(stderr, "  -d          add local datetime stamp at the start of each line\n");
   fprintf(stderr, "  -f FILENAME filename to use (default is %s)\n", DEFAULT_OUTPUT_LOG_FILENAME);
   fprintf(stderr, "  -h          print this usage and exit\n");
+  fprintf(stderr, "  -i FILENAME read input from provided filename instead of stdin\n");
   fprintf(stderr, "  -l LINES    maximum number of lines per file (default is %d)\n", DEFAULT_MAX_LINES);
   fprintf(stderr, "  -n FILES    maximum number of files to maintain (default is %d)\n", DEFAULT_MAX_FILES);
   fprintf(stderr, "  -t          add epoch timestamp at the start of each line\n");
@@ -92,6 +93,7 @@ int rotate_log(FILE** file, const char* filename, int max_files) {
 
 int main(int argc, char** argv) {
   const char* filename = DEFAULT_OUTPUT_LOG_FILENAME;
+  const char* in_filename = NULL;
   int max_lines = DEFAULT_MAX_LINES;
   int max_files = DEFAULT_MAX_FILES;
   int do_append = 0;
@@ -107,7 +109,7 @@ int main(int argc, char** argv) {
   int line_count = 0;
 
   while(c != -1) {
-    c = getopt(argc, argv, "adf:hl:n:t");
+    c = getopt(argc, argv, "adf:hi:l:n:t");
     switch (c) {
       case -1:
         break;
@@ -132,6 +134,10 @@ int main(int argc, char** argv) {
       case 'h':
         print_usage(argv[0]);
         return 0;
+
+      case 'i':
+        in_filename = optarg;
+        break;
 
       case 'l':
         max_lines = atoi(optarg);
@@ -171,6 +177,16 @@ int main(int argc, char** argv) {
   if (snprintf(ts_str, sizeof(ts_str), "%s.%d", filename, max_files-1) >= MAX_FILENAME_LENGTH) {
       fprintf(stderr, "Error: Filename too long.\n");
       return 1;
+  }
+
+  /* Open input file if provided */
+  if (in_filename && strlen(in_filename)) {
+    file_in = fopen(in_filename, "r");
+    if (!file_in) {
+      fprintf(stderr, "Error: Failed to open input file for reading\n");
+      ret = 1;
+      goto exit;
+    }
   }
 
   /* Initialize the log file */

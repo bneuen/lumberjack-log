@@ -16,6 +16,7 @@ Chop log into smaller logs.
   -d          add local datetime stamp at the start of each line
   -f FILENAME filename to use (default is log.log)
   -h          print this usage and exit
+  -i FILENAME read input from provided filename instead of stdin
   -l LINES    maximum number of lines per file (default is 10000)
   -n FILES    maximum number of files to maintain (default is 10)
   -t          add epoch timestamp at the start of each line
