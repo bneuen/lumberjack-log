@@ -1,6 +1,10 @@
 # Prerequisites
 *.d
 
+# Compiled output
+lumberjack
+a.out
+
 # Object files
 *.o
 *.ko
