@@ -22,6 +22,7 @@
  * SOFTWARE.
 */
 
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -34,6 +35,11 @@
 #define DEFAULT_MAX_LINES           (10000)
 #define MAX_FILENAME_LENGTH         (1024)
 #define MAX_TIMESTAMP_LENGTH        (64)
+
+#define eprint(e, frmt, ...) (e ? fprintf(stderr, "Error %d - %s: "frmt"\n", e, strerror(e), __VA_ARGS__) \
+                                : fprintf(stderr, "Error: "frmt"\n", __VA_ARGS__))
+#define wprint(e, frmt, ...) (e ? fprintf(stderr, "Warning %d - %s: "frmt"\n", e, strerror(e), __VA_ARGS__) \
+                                : fprintf(stderr, "Warning: "frmt"\n", __VA_ARGS__))
 
 void print_usage(const char* name) {
   fprintf(stderr, "Usage: <some_binary> 2>&1 | %s [OPTION]...\n", name);
@@ -52,23 +58,30 @@ void print_usage(const char* name) {
 int rotate_log(FILE** file, const char* filename, int max_files) {
   int i = 0;
   struct stat sb = {0};
-  char src_file[MAX_FILENAME_LENGTH] = "";
-  char dst_file[MAX_FILENAME_LENGTH] = "";
+  char src_file[MAX_FILENAME_LENGTH];
+  char dst_file[MAX_FILENAME_LENGTH];
 
   /* Close current log file if open */
   if (*file) {
-    fclose(*file);
+    if (fclose(*file) != 0) {
+      int err = errno;
+      wprint(err, "Failed to close log file while rotating%s", "");
+    }
     *file = NULL;
   }
 
   /* Remove maximum log filename if it exists */
   sprintf(src_file, "%s.%d", filename, max_files-1);
   if (stat(src_file, &sb) == 0) {
-    unlink(src_file);
+    if (unlink(src_file) != 0) {
+      int err = errno;
+      eprint(err, "Failed to remove old log file: %s", src_file);
+      return 1;
+    }
   }
 
   /* Rotate log files */
-  for (i = max_files; i > 0; i--) {
+  for (i = max_files-1; i > 0; i--) {
     sprintf(dst_file, "%s.%d", filename, i);
     if (i == 1) {
       strcpy(src_file, filename);
@@ -77,14 +90,19 @@ int rotate_log(FILE** file, const char* filename, int max_files) {
     }
 
     if (stat(src_file, &sb) == 0) {
-      rename(src_file, dst_file);
+      if (rename(src_file, dst_file) != 0) {
+        int err = errno;
+        eprint(err, "Failed to rename log file: %s -> %s", src_file, dst_file);
+        return 1;
+      }
     }
   }
 
   /* Open new log file */
   *file = fopen(filename, "a");
   if (!*file) {
-      fprintf(stderr, "Error: Failed to open new log for writing\n");
+      int err = errno;
+      eprint(err, "Failed to open new log file for writing: %s", filename);
       return 1;
   }
 
@@ -125,7 +143,7 @@ int main(int argc, char** argv) {
       case 'f':
         filename = optarg;
         if (!filename || !strlen(filename)) {
-            fprintf(stderr, "Error: Invalid filename.\n");
+            eprint(0, "Invalid filename%s", "");
             print_usage(argv[0]);
             return 1;
         }
@@ -142,7 +160,7 @@ int main(int argc, char** argv) {
       case 'l':
         max_lines = atoi(optarg);
         if (max_lines <= 0) {
-            fprintf(stderr, "Error: Invalid maximum number of lines: %s\n", optarg);
+            eprint(0, "Invalid maximum number of lines: %s\n", optarg);
             print_usage(argv[0]);
             return 1;
         }
@@ -151,7 +169,7 @@ int main(int argc, char** argv) {
       case 'n':
         max_files = atoi(optarg);
         if (max_files <= 0) {
-            fprintf(stderr, "Error: Invalid maximum number of files: %s\n", optarg);
+            eprint(0, "Invalid maximum number of files: %s\n", optarg);
             print_usage(argv[0]);
             return 1;
         }
@@ -168,14 +186,14 @@ int main(int argc, char** argv) {
         return 1;
 
       default:
-        fprintf(stderr, "Error: Unimplemented option: %c\n", optopt);
+        eprint(0, "Unimplemented option: %c\n", optopt);
         return 1;
     }
   }
 
   /* Check filename to ensure it is short enough for internal string buffers */
   if (snprintf(ts_str, sizeof(ts_str), "%s.%d", filename, max_files-1) >= MAX_FILENAME_LENGTH) {
-      fprintf(stderr, "Error: Filename too long.\n");
+      eprint(0, "Filename too long%s", "");
       return 1;
   }
 
@@ -183,7 +201,8 @@ int main(int argc, char** argv) {
   if (in_filename && strlen(in_filename)) {
     file_in = fopen(in_filename, "r");
     if (!file_in) {
-      fprintf(stderr, "Error: Failed to open input file for reading\n");
+      int err = errno;
+      eprint(err, "Failed to open input file for reading: %s", in_filename);
       ret = 1;
       goto exit;
     }
@@ -194,7 +213,8 @@ int main(int argc, char** argv) {
     /* Open log file */
     file_out = fopen(filename, "a+");
     if (!file_out) {
-      fprintf(stderr, "Error: Failed to open log for append\n");
+      int err = errno;
+      eprint(err, "Failed to open log file for append: %s", filename);
       ret = 1;
       goto exit;
     }
@@ -205,13 +225,17 @@ int main(int argc, char** argv) {
       if (c == EOF) {
         if (!is_newline) {
           if(fputc('\n', file_out) == EOF) {
-            fprintf(stderr, "Error: Failed to write newline character\n");
+            int err = errno;
+            eprint(err, "Failed to write newline character%s", "");
             ret = 1;
             goto exit;
           }
           line_count++;
           is_newline = 1;
-          fflush(file_out);
+          if (fflush(file_out) != 0) {
+            int err = errno;
+            wprint(err, "Failed to flush output after newline%s", "");
+          }
         }
         break;
       }
@@ -224,7 +248,7 @@ int main(int argc, char** argv) {
   } else {
     /* Initially rotate log to open log file and ensure log is new */
     if(rotate_log(&file_out, filename, max_files) != 0) {
-      fprintf(stderr, "Error: Failed to initially rotate log\n");
+      eprint(0, "Failed to initially rotate log%s", "");
       ret = 1;
       goto exit;
     }
@@ -241,7 +265,7 @@ int main(int argc, char** argv) {
     /* If current log file reached the line limit, then rotate logs */
     if (is_newline && (line_count >= max_lines)) {
       if(rotate_log(&file_out, filename, max_files) != 0) {
-        fprintf(stderr, "Error: Failed to rotate log\n");
+        eprint(0, "Failed to rotate log%s", "");
         ret = 1;
         goto exit;
       }
@@ -257,7 +281,8 @@ int main(int argc, char** argv) {
                 dt->tm_year+1900, dt->tm_mon+1, dt->tm_mday,
                 dt->tm_hour, dt->tm_min, dt->tm_sec, ts.tv_nsec/1000);
         if(fputs(ts_str, file_out) < 0) {
-          fprintf(stderr, "Error: Failed to write timestamp\n");
+          int err = errno;
+          eprint(err, "Failed to write datetime stamp: %s", ts_str);
           ret = 1;
           goto exit;
         }
@@ -269,7 +294,8 @@ int main(int argc, char** argv) {
         clock_gettime(CLOCK_MONOTONIC, &ts);
         snprintf(ts_str, sizeof(ts_str), "[%ld.%06ld]: ", ts.tv_sec, ts.tv_nsec/1000);
         if(fputs(ts_str, file_out) < 0) {
-          fprintf(stderr, "Error: Failed to write timestamp\n");
+          int err = errno;
+          eprint(err, "Failed to write epoch stamp: %s", ts_str);
           ret = 1;
           goto exit;
         }
@@ -277,7 +303,8 @@ int main(int argc, char** argv) {
 
     /* Write the character to the log */
     if(fputc(c, file_out) == EOF) {
-      fprintf(stderr, "Error: Failed to write character\n");
+      int err = errno;
+      eprint(err, "Failed to write character%s", "");
       ret = 1;
       goto exit;
     }
@@ -286,16 +313,25 @@ int main(int argc, char** argv) {
     is_newline = (c == '\n');
     if (is_newline) {
       line_count++;
-      fflush(file_out);
+      if (fflush(file_out) != 0) {
+        int err = errno;
+        wprint(err, "Failed to flush output after newline%s", "");
+      }
     }
   }
 
   exit:
     if(file_in) {
-      fclose(file_in);
+      if (fclose(file_in) != 0) {
+        int err = errno;
+        wprint(err, "Failed to close input while exiting%s", "");
+      }
     }
     if(file_out) {
-      fclose(file_out);
+      if (fclose(file_out) != 0) {
+        int err = errno;
+        wprint(err, "Failed to close output while exiting%s", "");
+      }
     }
     return ret;
 }
