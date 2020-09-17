@@ -223,26 +223,28 @@ int main(int argc, char** argv) {
     while (1) {
       c = fgetc(file_out);
       if (c == EOF) {
-        if (!is_newline) {
-          if(fputc('\n', file_out) == EOF) {
-            int err = errno;
-            eprint(err, "Failed to write newline character%s", "");
-            ret = 1;
-            goto exit;
-          }
-          line_count++;
-          is_newline = 1;
-          if (fflush(file_out) != 0) {
-            int err = errno;
-            wprint(err, "Failed to flush output after newline%s", "");
-          }
-        }
         break;
       }
 
       is_newline = (c == '\n');
       if (is_newline) {
         line_count++;
+      }
+    }
+
+    /* Ensure next write start on a new line */
+    if (!is_newline) {
+      if(fputc('\n', file_out) == EOF) {
+        int err = errno;
+        eprint(err, "Failed to write newline character%s", "");
+        ret = 1;
+        goto exit;
+      }
+      line_count++;
+      is_newline = 1;
+      if (fflush(file_out) != 0) {
+        int err = errno;
+        wprint(err, "Failed to flush output after newline%s", "");
       }
     }
   } else {
