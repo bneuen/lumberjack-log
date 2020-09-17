@@ -50,7 +50,7 @@ void print_usage(const char* name) {
   fprintf(stderr, "  -f FILENAME filename to use (default is %s)\n", DEFAULT_OUTPUT_LOG_FILENAME);
   fprintf(stderr, "  -h          print this usage and exit\n");
   fprintf(stderr, "  -i FILENAME read input from provided filename instead of stdin\n");
-  fprintf(stderr, "  -l LINES    maximum number of lines per file (default is %d)\n", DEFAULT_MAX_LINES);
+  fprintf(stderr, "  -l LINES    maximum number of lines per file (default is %d, 0 to disable limit)\n", DEFAULT_MAX_LINES);
   fprintf(stderr, "  -n FILES    maximum number of files to maintain (default is %d)\n", DEFAULT_MAX_FILES);
   fprintf(stderr, "  -t          add epoch timestamp at the start of each line\n");
 }
@@ -158,8 +158,9 @@ int main(int argc, char** argv) {
         break;
 
       case 'l':
-        max_lines = atoi(optarg);
-        if (max_lines <= 0) {
+        if (strspn(optarg, "0123456789") == strlen(optarg)) {
+            max_lines = atoi(optarg);
+        } else {
             eprint(0, "Invalid maximum number of lines: %s\n", optarg);
             print_usage(argv[0]);
             return 1;
@@ -167,7 +168,10 @@ int main(int argc, char** argv) {
         break;
 
       case 'n':
-        max_files = atoi(optarg);
+        max_files = 0;
+        if (strspn(optarg, "0123456789") == strlen(optarg)) {
+            max_files = atoi(optarg);
+        }
         if (max_files <= 0) {
             eprint(0, "Invalid maximum number of files: %s\n", optarg);
             print_usage(argv[0]);
@@ -265,7 +269,7 @@ int main(int argc, char** argv) {
     }
 
     /* If current log file reached the line limit, then rotate logs */
-    if (is_newline && (line_count >= max_lines)) {
+    if (is_newline && (max_lines != 0) && (line_count >= max_lines)) {
       if(rotate_log(&file_out, filename, max_files) != 0) {
         eprint(0, "Failed to rotate log%s", "");
         ret = 1;
