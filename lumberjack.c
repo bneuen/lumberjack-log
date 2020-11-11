@@ -125,6 +125,7 @@ int main(int argc, char** argv) {
   FILE* file_out = NULL;
   int is_newline = 1;
   int line_count = 0;
+  int write_error = 0;
 
   while(c != -1) {
     c = getopt(argc, argv, "adf:hi:l:n:t");
@@ -261,25 +262,36 @@ int main(int argc, char** argv) {
   }
 
   /* Read and output to log, rotating log files as necessary */
-  while(ret == 0) {
-    c = fgetc(file_in);
-    if (c == EOF) {
-      /* End of input */
-      break;
+  while (ret == 0) {
+    /* If a new log file failed to write, consider this a fatal error */
+    if (write_error && is_newline && (line_count == 0)) {
+      eprint(0, "Failed to write new log file%s", "");
+      ret = 1;
+      goto exit;
     }
 
-    /* If current log file reached the line limit, then rotate logs */
-    if (is_newline && (max_lines != 0) && (line_count >= max_lines)) {
+    /* Get next input character if previous character was written */
+    if (!write_error) {
+      c = fgetc(file_in);
+      if (c == EOF) {
+        /* End of input */
+        break;
+      }
+    }
+
+    /* If write error or log reached the line limit, then rotate logs */
+    if (write_error || (is_newline && (max_lines != 0) && (line_count >= max_lines))) {
       if(rotate_log(&file_out, filename, max_files) != 0) {
         eprint(0, "Failed to rotate log%s", "");
         ret = 1;
         goto exit;
       }
+      write_error = 0;
       line_count = 0;
     }
 
     /* If enabled, prefix a local timestamp on the line */
-    if(do_timestamp && is_newline) {
+    if (do_timestamp && is_newline) {
         struct timespec ts = {0};
         clock_gettime(CLOCK_REALTIME, &ts);
         struct tm *dt = localtime(&(ts.tv_sec));
@@ -288,31 +300,31 @@ int main(int argc, char** argv) {
                 dt->tm_hour, dt->tm_min, dt->tm_sec, ts.tv_nsec/1000);
         if(fputs(ts_str, file_out) < 0) {
           int err = errno;
-          eprint(err, "Failed to write datetime stamp: %s", ts_str);
-          ret = 1;
-          goto exit;
+          wprint(err, "Failed to write datetime stamp: %s", ts_str);
+          write_error = 1;
+          continue;
         }
     }
 
     /* If enabled, prefix a epoch timestamp on the line */
-    if(do_epochstamp && is_newline) {
+    if (do_epochstamp && is_newline) {
         struct timespec ts = {0};
         clock_gettime(CLOCK_MONOTONIC, &ts);
         snprintf(ts_str, sizeof(ts_str), "[%ld.%06ld]: ", ts.tv_sec, ts.tv_nsec/1000);
         if(fputs(ts_str, file_out) < 0) {
           int err = errno;
-          eprint(err, "Failed to write epoch stamp: %s", ts_str);
-          ret = 1;
-          goto exit;
+          wprint(err, "Failed to write epoch stamp: %s", ts_str);
+          write_error = 1;
+          continue;
         }
     }
 
     /* Write the character to the log */
-    if(fputc(c, file_out) == EOF) {
+    if (fputc(c, file_out) == EOF) {
       int err = errno;
-      eprint(err, "Failed to write character%s", "");
-      ret = 1;
-      goto exit;
+      wprint(err, "Failed to write character%s", "");
+      write_error = 1;
+      continue;
     }
 
     /* Mark if this was a newline character */
